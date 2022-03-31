@@ -51,10 +51,21 @@ module VCAP::CloudController
                       map{|t| [t.id.to_s, {"cert"=>(t.credentials.has_key?("cert") ? t.credentials["cert"] : ""), "key"=> (t.credentials.has_key?("key") ? t.credentials["key"] : "")} ]}.to_h
 
       guid_to_drain_maps.each do |guid_and_drains|
+        drain_credentials_pairs = Array.new
+        app_drain_ids = guid_and_drains[:service_binding_ids].split(',')
+        app_drain_urls = guid_and_drains[:syslog_drain_urls].split(',')
+        app_drain_ids.each_with_index do |id,index|
+            drain_credentials = credentials[id]
+            drain_credentials_pairs.push({
+                drain: app_drain_urls[index],
+                cert: drain_credentials["cert"],
+                key: drain_credentials["key"]
+            }.to_h)
+        end
+
         drain_urls[guid_and_drains[:guid]] = {
-          drains: guid_and_drains[:syslog_drain_urls].split(','),
-          hostname: hostname_from_app_name(guid_and_drains[:organization_name], guid_and_drains[:space_name], guid_and_drains[:name]),
-          credentials: credentials.values_at(*guid_and_drains[:service_binding_ids].split(',')).compact
+          drains: drain_credentials_pairs,
+          hostname: hostname_from_app_name(guid_and_drains[:organization_name], guid_and_drains[:space_name], guid_and_drains[:name])
         }
       end
 
