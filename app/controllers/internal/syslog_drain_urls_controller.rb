@@ -64,8 +64,9 @@ module VCAP::CloudController
         end
 
         drain_urls[guid_and_drains[:guid]] = {
-          drains: drain_credentials_pairs,
-          hostname: hostname_from_app_name(guid_and_drains[:organization_name], guid_and_drains[:space_name], guid_and_drains[:name])
+          drains: guid_and_drains[:syslog_drain_urls].split(','),
+          hostname: hostname_from_app_name(guid_and_drains[:organization_name], guid_and_drains[:space_name], guid_and_drains[:name]),
+          credentials: drain_credentials_pairs
         }
       end
 
