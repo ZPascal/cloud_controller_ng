@@ -46,6 +46,37 @@ module VCAP::CloudController
       [HTTP::OK, MultiJson.dump({ results: drain_urls, next_id: next_page_token }, pretty: true)]
     end
 
+    get '/internal/v4/get_client_certs', :list_certs
+
+    def list_certs
+      prepare_aggregate_function
+      service_bindings =
+        ServiceBinding.
+        exclude(syslog_drain_url: nil).
+        exclude(syslog_drain_url: '').
+        where(Sequel.lit("updated_at > ?", updated_at_param)).
+        select(:updated_at, :credentials, :syslog_drain_url, :app_guid, :salt, :encryption_key_label, :encryption_iterations).all
+
+      creds_to_apps_map = service_bindings.select { |sb|
+        creds = sb.credentials
+        creds.include?('cert') &&
+        !creds.fetch('cert', '').empty? &&
+        creds.include?('key') &&
+        !creds.fetch('key', '').empty?
+      }.map { |sb|
+        creds = sb.credentials
+        {
+          app_ids: [sb.app_guid],
+          credentials: {
+            cert: creds.fetch('cert'),
+            private_key: creds.fetch('key')
+          }
+        }
+      }
+
+      [HTTP::OK, MultiJson.dump({ certificates: creds_to_apps_map, updated_at: DateTime.now.iso8601 }, pretty: true)]
+    end
+
     private
 
     def hostname_from_app_name(*names)
@@ -76,6 +107,10 @@ module VCAP::CloudController
 
     def batch_size
       Integer(params.fetch('batch_size', 50))
+    end
+
+    def updated_at_param
+      params.fetch('updated_at', (Date.today - 1)).to_datetime.iso8601
     end
   end
 end

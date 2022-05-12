@@ -174,10 +174,6 @@ module VCAP::CloudController
         end
       end
 
-      def decoded_results
-        decoded_response.fetch('results')
-      end
-
       describe 'paging' do
         before do
           3.times do
@@ -275,6 +271,35 @@ module VCAP::CloudController
           end
         end
       end
+    end
+
+    describe 'GET /internal/v4/get_client_certs' do
+      before do
+        5.times do |i|
+          ServiceBinding.make(
+            app: app_obj,
+            syslog_drain_url: "syslog://example.com/#{i}",
+            service_instance: UserProvidedServiceInstance.make(space: app_obj.space),
+            credentials: {
+              cert: 'a_cert',
+              key: 'a_key'
+            }
+          )
+        end
+      end
+
+      it 'returns a list of app_ids and their credentials' do
+        get '/internal/v4/get_client_certs', {
+          'updated_at' => '2022-05-12 16:18:33 UTC'
+        }
+
+        expect(last_response).to be_successful
+        expect(decoded_response.fetch('certificates').count).to eq(5)
+      end
+    end
+
+    def decoded_results
+      decoded_response.fetch('results')
     end
   end
 end
