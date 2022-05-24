@@ -46,18 +46,17 @@ module VCAP::CloudController
       [HTTP::OK, MultiJson.dump({ results: drain_urls, next_id: next_page_token }, pretty: true)]
     end
 
-    get '/internal/v4/get_client_certs', :list_certs
+    get '/internal/v4/get_client_certs', :client_certs
 
-    def list_certs
-      prepare_aggregate_function
-      service_bindings =
-        ServiceBinding.
-        exclude(syslog_drain_url: nil).
-        exclude(syslog_drain_url: '').
-        where(Sequel.lit("updated_at > ?", updated_at_param)).
-        select(:updated_at, :credentials, :syslog_drain_url, :app_guid, :salt, :encryption_key_label, :encryption_iterations).all
+    def client_certs
+      service_bindings = ServiceBinding.
+                         exclude(syslog_drain_url: nil).
+                         exclude(syslog_drain_url: '').
+                         where(Sequel.lit('updated_at > ?', updated_at_param)).
+                         select(:updated_at, :credentials, :syslog_drain_url, :app_guid, :salt, :encryption_key_label, :encryption_iterations).all
 
-      creds_to_apps_map = service_bindings.select { |sb|
+      outcome = {}
+      service_bindings.select { |sb|
         creds = sb.credentials
         creds.include?('cert') &&
         !creds.fetch('cert', '').empty? &&
@@ -65,16 +64,31 @@ module VCAP::CloudController
         !creds.fetch('key', '').empty?
       }.map { |sb|
         creds = sb.credentials
+        cert = creds.fetch('cert')
+        key = creds.fetch('key')
         {
           app_ids: [sb.app_guid],
           credentials: {
-            cert: creds.fetch('cert'),
-            private_key: creds.fetch('key')
-          }
+            cert: cert,
+            private_key: key
+          },
+          credentials_md5: Digest::MD5.hexdigest(cert + key)
         }
+      }.each { |uc|
+        if outcome[uc[:credentials_md5]].nil?
+          outcome[uc[:credentials_md5]] = {
+            app_ids: uc[:app_ids],
+            credentials: uc[:credentials]
+          }
+        else
+          outcome[uc[:credentials_md5]] = {
+            app_ids: outcome[uc[:credentials_md5]][:app_ids].concat(uc[:app_ids]),
+            credentials: uc[:credentials]
+          }
+        end
       }
 
-      [HTTP::OK, MultiJson.dump({ certificates: creds_to_apps_map, updated_at: DateTime.now.iso8601 }, pretty: true)]
+      [HTTP::OK, MultiJson.dump({ certificates: outcome.values, updated_at: DateTime.now.iso8601 }, pretty: true)]
     end
 
     private

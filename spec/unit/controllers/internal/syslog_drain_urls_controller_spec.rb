@@ -273,33 +273,83 @@ module VCAP::CloudController
       end
     end
 
-    describe 'GET /internal/v4/get_client_certs' do
+    describe 'benchmark get_client_certs' do
       before do
-        5.times do |i|
+        certs_and_keys = 100.times.map {
+          my_cert = SelfSignedCertificate.new
+          {
+            cert: my_cert.self_signed_pem,
+            key: my_cert.private_key.to_s
+          }
+        }
+
+        5000.times do |i|
+          c = certs_and_keys.sample
           ServiceBinding.make(
             app: app_obj,
             syslog_drain_url: "syslog://example.com/#{i}",
             service_instance: UserProvidedServiceInstance.make(space: app_obj.space),
             credentials: {
-              cert: 'a_cert',
-              key: 'a_key'
+              cert: c[:cert],
+              key: c[:key]
             }
           )
         end
       end
 
       it 'returns a list of app_ids and their credentials' do
+        start_time = Time.now
         get '/internal/v4/get_client_certs', {
-          'updated_at' => '2022-05-12 16:18:33 UTC'
+          'updated_at' => (Date.today - 1).to_datetime.iso8601
         }
+        end_time = Time.now - start_time
 
+        puts end_time
         expect(last_response).to be_successful
-        expect(decoded_response.fetch('certificates').count).to eq(5)
+        expect(decoded_response.fetch('certificates').count).to be > 0
       end
     end
 
     def decoded_results
       decoded_response.fetch('results')
     end
+  end
+end
+
+class SelfSignedCertificate
+  def initialize
+    @key = OpenSSL::PKey::RSA.new(2048)
+    public_key = @key.public_key
+
+    subject = '/C=BE/O=Test/OU=Test/CN=Test'
+
+    @cert = OpenSSL::X509::Certificate.new
+    @cert.subject = @cert.issuer = OpenSSL::X509::Name.parse(subject)
+    @cert.not_before = Time.now
+    @cert.not_after = Time.now + 365 * 24 * 60 * 60
+    @cert.public_key = public_key
+    @cert.serial = 0x0
+    @cert.version = 2
+
+    ef = OpenSSL::X509::ExtensionFactory.new
+    ef.subject_certificate = @cert
+    ef.issuer_certificate = @cert
+    @cert.extensions = [
+      ef.create_extension('basicConstraints', 'CA:TRUE', true),
+      ef.create_extension('subjectKeyIdentifier', 'hash'),
+      ef.create_extension('keyUsage', 'cRLSign,keyCertSign', true),
+    ]
+    @cert.add_extension ef.create_extension('authorityKeyIdentifier',
+                                           'keyid:always,issuer:always')
+
+    @cert.sign @key, OpenSSL::Digest.new('SHA1')
+  end
+
+  def self_signed_pem
+    @cert.to_pem
+  end
+
+  def private_key
+    @key
   end
 end
