@@ -76,31 +76,42 @@ module VCAP::CloudController
                    :organizations__name___organization_name
                  ).
                  where(service_bindings__syslog_drain_url: syslog_drain_urls_query).
-                 each_with_object({}) { |item, injected|
-                   credentials = item.credentials
-                   key = credentials.fetch('key', '')
-                   cert = credentials.fetch('cert', '')
-                   syslog_drain_url = item[:syslog_drain_url]
-                   hostname = hostname_from_app_name(item[:organization_name], item[:space_name], item[:app_name])
-                   if injected.include?(syslog_drain_url)
-                     existing_item = injected[syslog_drain_url]
-                     existing_apps = existing_item[:apps]
-                     new_apps = existing_apps.push({ hostname: hostname, app_id: item[:app_guid] })
-                     existing_item[:apps] = new_apps
-                     existing_item[:key] = key unless key.empty?
-                     existing_item[:cert] = cert unless cert.empty?
-                     injected[syslog_drain_url] = existing_item
-                   else
-                     target = {
-                       url: syslog_drain_url,
-                       cert: cert,
-                       key: key,
-                       apps: [{ hostname: hostname, app_id: item[:app_guid] }]
-                     }
-                     injected[syslog_drain_url] = target
+                   each_with_object({}) { |item, injected|
+                     credentials = item.credentials
+                     key = credentials.fetch('key', '')
+                     cert = credentials.fetch('cert', '')
+                     syslog_drain_url = item[:syslog_drain_url]
+                     hostname = hostname_from_app_name(item[:organization_name], item[:space_name], item[:app_name])
+                     if injected.include?(syslog_drain_url)
+                       existing_item = injected[syslog_drain_url]
+                       existing_cert_apps_map = existing_item[:cert_apps_map]
+                       if existing_cert_apps_map.key?(cert)
+                         existing_cert_entry = existing_cert_apps_map[cert]
+                         existing_apps = existing_cert_entry[:apps]
+                         new_apps = existing_apps.push({ hostname: hostname, app_id: item[:app_guid] })
+                         existing_cert_entry[:apps] = new_apps
+                       else
+                         cert_apps_arr = {cert: cert, key:key, apps: [{ hostname: hostname, app_id: item[:app_guid] }]}
+                         existing_cert_apps_map[cert] = cert_apps_arr
+                       end
+                       injected[syslog_drain_url] = existing_item
+                     else
+                       cert_apps_arr = {cert: cert, key:key, apps: [{ hostname: hostname, app_id: item[:app_guid] }]}
+                       cert_map = {}
+                       cert_map[cert] = cert_apps_arr
+                       target = {
+                         url: syslog_drain_url,
+                         cert_apps_map: cert_map
+                       }
+                       injected[syslog_drain_url] = target
+                     end
+                     injected
+                   }.values
+
+                   bindings.each do| binding |
+                   binding[:credentials] = binding[:cert_apps_map].values
+                   binding.reject! { |targets| targets == :cert_apps_map }
                    end
-                   injected
-                 }.values
 
       next_page_token = nil
 
